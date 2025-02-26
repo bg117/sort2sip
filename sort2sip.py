@@ -74,15 +74,11 @@ def main():
         scroll2_event.clear()
 
         lcd2.print(f"Points: {points} mL")
-        input()
+        n = wait_for_trash()
 
         scroll1_event.clear()
 
-        lcd1.print("Detecting...")
-        time.sleep(0.5)
-
-        n = random.randint(0, 2)
-        angle = 0
+       	angle = 0
         if n == 0:
             lcd1.print("Detected:\r\nPlastic bottle")
             points += 96
@@ -99,13 +95,13 @@ def main():
         time.sleep(0.5)
 
         pi.set_servo_pulsewidth(13, 1800)
-    
+
         lcd2.print(f"Points: {points} mL")
 
-        time.sleep(5)
+        time.sleep(3)
 
         scroll2_event.set()
-        input()
+        wait_for_button_press()
 
 
 def print_scroll(lcd, message, scroll_event, kill_event):
@@ -114,7 +110,7 @@ def print_scroll(lcd, message, scroll_event, kill_event):
             scroll_event.wait()
             if kill_event.is_set():
                 return
-            
+
             substr = message[i - LCD_COLS : i]
             if i == LCD_COLS or i == len(message):
                 for j in range(3):
@@ -133,6 +129,16 @@ def map_degrees_to_servo(ccw, cw, deg):
     motion = round(range * percent)
 
     return ccw + motion
+
+
+def wait_for_trash():
+    #input()
+    return random.randint(0, 2)
+
+
+def wait_for_button_press():
+    #input()
+    pass
 
 
 if __name__ == "__main__":
