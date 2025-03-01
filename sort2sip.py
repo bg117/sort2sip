@@ -3,8 +3,29 @@ from RPLCD.i2c import CharLCD
 import pigpio
 import time
 import random
+import cv2
+import numpy as np
+import requests
+import base64
+import RPi.GPIO as GPIO
+from apikey import API_KEY
 
+upload_url = "".join([
+    "https://detect.roboflow.com/",
+    "trash-detection-kfzaq/10",
+    "?api_key=",
+    API_KEY,
+    "&format=json",
+    "&stroke=5"
+])
+
+video = cv2.VideoCapture("/dev/video0")
 pi = pigpio.pi()
+
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(19, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+GPIO.setup(26, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+GPIO.setup(13, GPIO.OUT)
 
 I2C_CHIP = "PCF8574"
 I2C_ADDR = 0x27
@@ -45,6 +66,11 @@ scroll2_event = threading.Event()
 kill2_event = threading.Event()
 
 def main():
+    GPIO.output(13, GPIO.HIGH)
+
+    while not video.isOpened():
+        pass
+
     welcome_thread = threading.Thread(
         target=print_scroll,
         args=(
@@ -79,7 +105,7 @@ def main():
         scroll1_event.clear()
 
        	angle = 0
-        if n == 0:
+        if n == 1:
             lcd1.print("Detected:\r\nPlastic bottle")
             points += 96
         elif n == 1:
@@ -96,12 +122,16 @@ def main():
 
         pi.set_servo_pulsewidth(13, 1800)
 
-        lcd2.print(f"Points: {points} mL")
 
         time.sleep(3)
 
         scroll2_event.set()
-        wait_for_button_press()
+        water = wait_for_button_press()
+        scroll2_event.set()
+        if water:
+                run_motor(points)
+                points = 0
+                lcd2.print(f"Points: {points} mL")
 
 
 def print_scroll(lcd, message, scroll_event, kill_event):
@@ -132,26 +162,64 @@ def map_degrees_to_servo(ccw, cw, deg):
 
 
 def wait_for_trash():
-    #input()
-    return random.randint(0, 2)
-
+    data = infer()
+    print(data)
+    if len(data['predictions']) > 0:
+        return data['predictions'][0]['class_id']
+    return wait_for_trash()
 
 def wait_for_button_press():
-    #input()
-    pass
+    use == GPIO.LOW
+    while GPIO.input(26) == GPIO.LOW and use == GPIO.LOW:
+        use = GPIO.input(19)
+    print('detected presss')
+
+    return use == GPIO.HIGH
+
+def infer():
+    # Get the current image from the webcam
+    ret, img = video.read()
+
+    # Resize (while maintaining the aspect ratio) to improve speed and save bandwidth
+    height, width, channels = img.shape
+    scale = 416 / max(height, width)
+    img = cv2.resize(img, (round(scale * width), round(scale * height)))
+
+    # Encode image to base64 string
+    retval, buffer = cv2.imencode('.jpg', img)
+    img_str = base64.b64encode(buffer)
+
+    # Get prediction from Roboflow Infer API
+    resp = requests.post(upload_url, data=img_str, headers={
+        "Content-Type": "application/x-www-form-urlencoded"
+    }, stream=True).json()
+
+    # Parse result image
+    return resp
+
+
+def run_motor(points):
+    GPIO.output(13, GPIO.HIGH)
+    time.sleep(points * 0.1)
+    GPIO.output(13, GPIO.LOW)
 
 
 if __name__ == "__main__":
     try:
         main()
-    except:
+    finally:
         print("Stopping")
+
+        video.release()
+        cv2.destroyAllWindows()
 
         scroll1_event.set()
         kill1_event.set()
 
         scroll2_event.set()
         kill2_event.set()
+
+        GPIO.cleanup()
 
         pi.set_servo_pulsewidth(SERVO_ROTATE, 0)
         pi.set_servo_pulsewidth(SERVO_DOOR, 0)
