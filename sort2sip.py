@@ -1,18 +1,20 @@
 import threading
 from RPLCD.i2c import CharLCD
-import pigpio
 import time
 import random
 import cv2
 import numpy as np
 import requests
 import base64
-import RPi.GPIO as GPIO
 from apikey import API_KEY
+from gpiozero import Button, LED, Servo, Device
+from gpiozero.pins.pigpio import PiGPIOFactory
+
+Device.pin_factory = PiGPIOFactory()
 
 upload_url = "".join([
     "https://detect.roboflow.com/",
-    "trash-detection-kfzaq/10",
+    "paper-and-plastic-detection/4",
     "?api_key=",
     API_KEY,
     "&format=json",
@@ -20,20 +22,18 @@ upload_url = "".join([
 ])
 
 video = cv2.VideoCapture("/dev/video0")
-pi = pigpio.pi()
 
-GPIO.setmode(GPIO.BCM)
-GPIO.setup(19, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
-GPIO.setup(26, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
-GPIO.setup(13, GPIO.OUT)
+no_water_btn = Button(5)
+use_water_btn = Button(6)
+water_pump = LED(13)
+
+door_servo = Servo(19)
+rotate_servo = Servo(26)
 
 I2C_CHIP = "PCF8574"
 I2C_ADDR = 0x27
 LCD_COLS = 16
 LCD_ROWS = 2
-
-SERVO_DOOR = 13
-SERVO_ROTATE = 19
 
 MAX_CCW = 700
 MAX_CW = 2300
@@ -66,8 +66,6 @@ scroll2_event = threading.Event()
 kill2_event = threading.Event()
 
 def main():
-    GPIO.output(13, GPIO.HIGH)
-
     while not video.isOpened():
         pass
 
@@ -107,32 +105,39 @@ def main():
        	angle = 0
         if n == 1:
             lcd1.print("Detected:\r\nPlastic bottle")
-            points += 96
+            points += 70 
+            rotate_servo.min()
         elif n == 1:
-            lcd1.print("Detected:\r\nColored paper")
-            points += 13
-            angle = 90
+            lcd1.print("Detected:\r\nAluminum can")
+            points += 135
+            rotate_servo.mid()
         elif n == 2:
-            lcd1.print("Detected:\r\nWhite paper")
-            points += 8
-            angle = 180
+            lcd1.print("Detected:\r\nPaper")
+            points += 10
+            rotate_servo.max()
 
-        pi.set_servo_pulsewidth(19, 700)
+        lcd2.print(f"Points: {points} mL")
         time.sleep(0.5)
 
-        pi.set_servo_pulsewidth(13, 1800)
+        door_servo.max()
+        time.sleep(0.5)
 
+        door_servo.min()
+        time.sleep(0.5)
+
+        rotate_servo.mid()
 
         time.sleep(3)
 
         scroll2_event.set()
         water = wait_for_button_press()
-        scroll2_event.set()
-        if water:
-                run_motor(points)
-                points = 0
-                lcd2.print(f"Points: {points} mL")
+        
+        scroll2_event.clear()
 
+        if water:
+            run_motor(points)
+            points = 0
+        
 
 def print_scroll(lcd, message, scroll_event, kill_event):
     while True:
@@ -168,13 +173,16 @@ def wait_for_trash():
         return data['predictions'][0]['class_id']
     return wait_for_trash()
 
-def wait_for_button_press():
-    use == GPIO.LOW
-    while GPIO.input(26) == GPIO.LOW and use == GPIO.LOW:
-        use = GPIO.input(19)
-    print('detected presss')
 
-    return use == GPIO.HIGH
+def wait_for_button_press():
+    while True:
+        if use_water_btn.is_pressed: 
+            print("Use water")
+            return True
+        elif no_water_btn.is_pressed:
+            print("DO NOT use water")
+            return False
+        
 
 def infer():
     # Get the current image from the webcam
@@ -199,9 +207,9 @@ def infer():
 
 
 def run_motor(points):
-    GPIO.output(13, GPIO.HIGH)
-    time.sleep(points * 0.1)
-    GPIO.output(13, GPIO.LOW)
+    water_pump.on()
+    time.sleep(points / 20)
+    water_pump.off()
 
 
 if __name__ == "__main__":
@@ -218,11 +226,6 @@ if __name__ == "__main__":
 
         scroll2_event.set()
         kill2_event.set()
-
-        GPIO.cleanup()
-
-        pi.set_servo_pulsewidth(SERVO_ROTATE, 0)
-        pi.set_servo_pulsewidth(SERVO_DOOR, 0)
 
         lcd1.close(clear=True)
         lcd2.close(clear=True)
